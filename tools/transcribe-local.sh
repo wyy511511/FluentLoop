@@ -20,9 +20,20 @@ if [[ -z "${BIN}" ]]; then
   echo "whisper-cli not found. Install/build whisper.cpp first."
   exit 1
 fi
-TMP="$(mktemp /tmp/fluent-lab-whisper-XXXXXXXX)"
-trap 'rm -f "${TMP}"' EXIT
-ffmpeg -hide_banner -loglevel error -y -i "${FILE}" -ar 16000 -ac 1 -c:a pcm_s16le -f wav "${TMP}"
-BASE="${FILE%.*}"
-"${BIN}" -m "${MODEL}" -f "${TMP}" -otxt -of "${BASE}" -l en
-printf 'TRANSCRIPT:%s.txt\n' "${BASE}"
+WORK="$(mktemp -d /tmp/fluent-lab-whisper-XXXXXXXX)"
+trap 'rm -rf "${WORK}"' EXIT
+WAV="${WORK}/audio.wav"
+OUT_BASE="${WORK}/transcript"
+ffmpeg -hide_banner -loglevel error -y -i "${FILE}" -ar 16000 -ac 1 -c:a pcm_s16le -f wav "${WAV}"
+if ! "${BIN}" -m "${MODEL}" -f "${WAV}" -otxt -of "${OUT_BASE}" -l en; then
+  echo "GPU transcription failed; retrying on CPU..." >&2
+  "${BIN}" -m "${MODEL}" -f "${WAV}" -otxt -of "${OUT_BASE}" -l en -ng
+fi
+SESSION_DIR="$(dirname "${FILE}")"
+if [[ -f "${SESSION_DIR}/session.json" ]]; then
+  OUTPUT="${SESSION_DIR}/before.txt"
+else
+  OUTPUT="${FILE%.*}.txt"
+fi
+cp "${OUT_BASE}.txt" "${OUTPUT}"
+printf 'TRANSCRIPT:%s\n' "${OUTPUT}"
